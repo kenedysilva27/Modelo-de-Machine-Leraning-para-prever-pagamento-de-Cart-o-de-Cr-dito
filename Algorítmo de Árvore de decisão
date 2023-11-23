@@ -1,0 +1,378 @@
+# Neste projeto aplicaremos o método KDD (knowledge Discovery in Databases) para análise e modelagem da base de dados e o 
+#algoritmo de árvore de decisão para criar o modelo.
+
+Objetivo: Criar modelo capaz de prever não pagamento do cartão de crédito dos clientes e compreender os seus diferentes perfis.
+
+# Importando as bibliotecas iniciais
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from imblearn.over_sampling import SMOTE
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.metrics import accuracy_score, classification_report, roc_auc_score, roc_curve,confusion_matrix
+
+# retirando as mensagens de warning
+
+import warnings
+warnings.filterwarnings("ignore")
+
+# Carregando o conjunto de dados
+
+caminho_arquivo = "C://Users//dados//Desktop//Estudos//UCI_Credit_Card.csv"
+Taiwan_Dataset = pd.read_csv(caminho_arquivo)
+
+# EDA
+
+#verificando as 5 primeiras linhas do dataframe
+Taiwan_Dataset.head()
+
+# A base de dados Taiwan Dataset contém informações sobre pagamentos padrão, fatores demográficos, dados de crédito,histórico
+# de pagamentos e extratos de contas de clientes de cartão de crédito em Taiwan de abril de 2005 a setembro de 2005.
+# São 24 Features e 1 alvo: default.payment.next.month onde 0 representa não pagamento e 1 pagamento do cartão.
+
+# Tratamento de Dados
+
+# Verificando se há linhas duplicadas no DataFrame
+duplicadas = Taiwan_Dataset.duplicated().sum()
+duplicadas
+
+# Verificando se há nulos
+Taiwan_Dataset.isna().sum()
+
+Escolhendo as Features com maior correlação com a variável alvo
+
+# Vamos criar um Objeto que conterá a correlação das features com a alvo
+correlacao = Taiwan_Dataset.corr()['default.payment.next.month'].sort_values(ascending=False)
+
+# Agora vamos plotar um gráfico
+plt.figure(figsize=(10, 6))
+correlacao.drop('default.payment.next.month').plot(kind='bar')
+plt.title('Correlação das Features com default.payment.next.month')
+plt.xlabel('Features')
+plt.ylabel('Correlação')
+plt.show()
+
+# Verificamos que PAY_0,PAY_2,PAY_3,PAY_4,PAY_5,PAY_6,EDUATION E AGE são as features que tem correlação positiva com a alvo,
+# as demais não são tão importantes para o nosso objetivo, então não as usaremos.
+
+# Ainda que o algoritmo de árvore de decisão não seja tão influenciado pelas escalas das features, sempre acho por bem
+# Normalizá-las/Padronizá-las.
+
+from sklearn.preprocessing import StandardScaler
+
+# Escolhendo as features que serão padronizadas
+features_normalizadas = ['EDUCATION', 'AGE', 'PAY_0', 'PAY_2', 'PAY_3', 'PAY_4', 'PAY_5', 'PAY_6']
+
+# Criando um objeto de padronização
+scaler = StandardScaler()
+
+# Aplicando a padronização nas features e atualizando o DataFrame original
+Taiwan_Dataset[features_normalizadas] = scaler.fit_transform(Taiwan_Dataset[features_normalizadas])
+
+# Verificando o dataset
+
+Taiwan_Dataset
+
+# Precisamos separar o nosso datraframe em X e y e convertê-lo em um array numpy para depois usarmos no algorítmo.
+
+y = Taiwan_Dataset['default.payment.next.month'].values
+X = Taiwan_Dataset[['EDUCATION', 'PAY_0', 'PAY_2', 'PAY_3', 'PAY_4','PAY_5','PAY_6','AGE']].values
+
+Verificação de Outlier
+
+# Verificarei apenas a variável Idade pois é a única feature numérica que vamos utilizar
+
+sns.set(style="whitegrid")
+
+plt.figure(figsize=(6, 4))
+sns.boxplot(x='AGE', data=Taiwan_Dataset)
+plt.title('Box Plot para Idade')
+plt.show()
+
+# Mesmo após padronizarmos a escala da feature Idade com as demais features, observamos que ainda há data points acima do 
+# terceiro Quartil, o que pode influênciar o modelo para um resultado irreal. Precisamos cuidar desses Outlies.
+
+# Utilizaremos o intervalo interquártilico para remoção dos Outlies.
+
+# Calculando o IQR para a coluna AGE
+
+Q1_AGE = Taiwan_Dataset['AGE'].quantile(0.25)
+Q3_AGE = Taiwan_Dataset['AGE'].quantile(0.75)
+IQR_AGE = Q3_AGE - Q1_AGE
+
+# Definindo os limites inferior e superior para a coluna AGE
+
+Limite_Inferior_AGE = Q1_AGE - 1.5 * IQR_AGE
+Limite_Superior_AGE = Q3_AGE + 1.5 * IQR_AGE
+
+# Aplicando condições de remoção dos outliers
+condicoes_AGE = (Taiwan_Dataset['AGE'] >= Limite_Inferior_AGE) & (Taiwan_Dataset['AGE'] <= Limite_Superior_AGE)
+
+# Filtrando o dataframe sem outliers
+taiwan_sem_Outliers = Taiwan_Dataset[condicoes_AGE]
+
+# Verificando se ainda há Outliers
+
+sns.set(style="whitegrid")
+
+plt.figure(figsize=(6, 4))
+sns.boxplot(x='AGE', data=taiwan_sem_Outliers)
+plt.title('Box Plot para Idade')
+plt.show()
+
+# Verificando o tamanho do novo dataset
+taiwan_sem_Outliers.sample
+
+Verificação de Balanceamento da Variável alvo
+
+# Verificando se a variável alvo está balanceada
+
+print('Total de Registros Negativos:', sum(taiwan_sem_Outliers['default.payment.next.month'] == 0))
+print('Total de Registros Positivos:', sum(taiwan_sem_Outliers['default.payment.next.month'] == 1))
+
+# Nota-se que há um desbalanceamento no que se refere aos registros negativos serem 4 vezes mais doque os positivos,
+# o que pode trazer um resultado não tão justo para o modelo, vamos resolver isso..
+
+# Dividindo o conjunto de dados
+
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42)
+
+# para balancear as classes vamos utilizar o SMOTE que é uma técnica de oversampling que cria instâncias sintéticas da classe 
+# minoritária para equilibrar a distribuição das classes em conjuntos de dados desequilibrados.
+
+# Aplicando o SMOTE
+
+smote = SMOTE(random_state=42)
+X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
+
+# Vendo se a classe foi balanceada
+
+print('Total de Registros Negativos (balanceado):', sum(y_train_resampled == 0))
+print('Total de Registros Positivos (balanceado):', sum(y_train_resampled == 1))
+
+# Uma observação da utilização de técnicas oversampling é que sua aplicação pode gerar overfit no modelo.
+
+Criação do Modelo
+
+# Criando o modelo de árvore de decisão
+
+Algoritmo_arvore = DecisionTreeClassifier(criterion='entropy', max_depth=7)
+modelo = Algoritmo_arvore.fit(X_train_resampled, y_train_resampled)
+
+# Fazendo previsões com os 20 % dos dados restantes
+
+y_predicoes = modelo.predict(X_test)
+
+Avaliação do Modelo
+
+# Avaliando o modelo
+
+print('Acurácia da árvore:', accuracy_score(y_test, y_predicoes))
+print(classification_report(y_test, y_predicoes))
+
+# agora vamos plotar a árvore de decisão
+
+nome_features = ['EDUCATION', 'PAY_0', 'PAY_2', 'PAY_3', 'PAY_4','PAY_5','PAY_6','AGE']
+plt.figure(figsize=(15, 18))
+plot_tree(modelo, filled=True, feature_names=nome_features, class_names=['Não Pago', 'Pago'], rounded=True, fontsize=10)
+plt.show()
+
+Acurácia da árvore: 0.7623333333333333
+              precision    recall  f1-score   support
+
+           0       0.87      0.82      0.84      4687
+           1       0.46      0.56      0.51      1313
+
+    accuracy                           0.76      6000
+   macro avg       0.67      0.69      0.68      6000
+weighted avg       0.78      0.76      0.77      6000
+
+# Percebe-se que o modelo tem uma certa dificuldade em reconhecer os pagamentos realizados (1), observa-se isso graças ao Recall
+# que mostra a capacidade do modelo de acertar os verdadeiros positivos. O Nosso Recall foi de 0.56
+
+# Calculando a área sob a curva ROC (AUC-ROC)
+
+probas = modelo.predict_proba(X_test)[:, 1]  # Probabilidades da classe positiva
+roc_auc = roc_auc_score(y_test, probas)
+print(f'AUC-ROC: {roc_auc:.4f}')
+
+# Calculando a curva ROC
+
+fpr, tpr, _ = roc_curve(y_test, probas)
+
+# Plotando o gráfico
+
+plt.figure(figsize=(8, 6))
+plt.plot(fpr, tpr, color='darkorange', lw=2, label='Curva ROC (área = {:.2f})'.format(roc_auc))
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlabel('Taxa de Falso Positivo')
+plt.ylabel('Taxa de Verdadeiro Positivo')
+plt.title('Curva ROC')
+plt.legend(loc='lower right')
+plt.show()
+
+AUC-ROC: 0.7318
+
+# Calculando a matriz de confusão
+
+conf_matrix = confusion_matrix(y_test, y_predicoes)
+
+# Exibindo a matriz de confusão
+
+print("Matriz de Confusão:")
+print(conf_matrix)
+
+# Plotando a matriz de confusão
+
+import seaborn as sns
+plt.figure(figsize=(8, 6))
+sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', cbar=False)
+plt.xlabel('Predicted')
+plt.ylabel('True')
+plt.title('Matriz de Confusão')
+plt.show()
+
+Matriz de Confusão:
+[[3834  853]
+ [ 573  740]]
+
+Simulação de previsão de pagamento do cartão
+
+# Criando uma base fictícia que receberá os mesmos tratamentos que o modelo.
+
+base_teste = {
+    'EDUCATION': [3, 6, 2, 1, 3, 2, 5, 3, 2, 4],
+    'PAY_0': [2, 5, 0, 1, -2, 1, 0, 6, 2, 6],
+    'PAY_2': [-1, 5, -1, -1, 2, -2, 1, 0, -1, 2],
+    'PAY_3': [0, 5, 1, 2, -1, 0, 1, -2, 2, 0],
+    'PAY_4': [-1, 6, 0, -1, 1, 2, 1, 1, -2, 5],
+    'PAY_5': [2, 6, 1, 0, -1, 2, -2, 1, 0, 2],
+    'PAY_6': [1, 0, -1, 1, 0, -1, 1, 0, -1, 1],
+    'AGE': [25, 25, 22, 35, 28, 32, 26, 29, 31, 25]
+}
+
+Clientes = pd.DataFrame(base_teste)
+
+# Usando o mesmo scaler para padronizar os dados de teste
+
+X_teste_padronizado = scaler.transform(Clientes[['EDUCATION','AGE','PAY_0', 'PAY_2', 'PAY_3', 'PAY_4', 'PAY_5', 'PAY_6']])
+
+X_teste_padronizado = X_teste_padronizado[:, [2, 3, 4, 5, 6, 7, 0, 1]]
+
+# Fazendo as previsões no conjunto de teste
+
+previsoes = modelo.predict(X_teste_padronizado)
+
+# Criando o Loop for que pega o resultado das previsoes e da a resposta. Caso o resultado for 1 o clinte pagará o cartão, 
+# mas se for 0 o Cliente não pagará o cartão.
+
+for i, previsao in enumerate(previsoes):
+    resultado = 'Pagará o Cartão de Crédito' if previsao == 1 else 'Não pagará o Cartão de Crédito'
+    print(f"O modelo previu que o cliente {i + 1}: {resultado}")
+    
+
+# Imprimindo detalhes da Cliente 1    
+print("Dados do Cliente 1:")
+print(f"EDUCATION: {Clientes['EDUCATION'][0]}")
+print(f"PAY_0: {Clientes['PAY_0'][0]}")
+print(f"PAY_2: {Clientes['PAY_2'][0]}")
+print(f"PAY_3: {Clientes['PAY_3'][0]}")
+print(f"PAY_4: {Clientes['PAY_4'][0]}")
+print(f"PAY_5: {Clientes['PAY_5'][0]}")
+print(f"PAY_6: {Clientes['PAY_6'][0]}")
+print(f"AGE: {Clientes['AGE'][0]}")
+
+# Imprimindo detalhes da Cliente 2
+print("Dados do Cliente 2:")
+print(f"EDUCATION: {Clientes['EDUCATION'][1]}")
+print(f"PAY_0: {Clientes['PAY_0'][1]}")
+print(f"PAY_2: {Clientes['PAY_2'][1]}")
+print(f"PAY_3: {Clientes['PAY_3'][1]}")
+print(f"PAY_4: {Clientes['PAY_4'][1]}")
+print(f"PAY_5: {Clientes['PAY_5'][1]}")
+print(f"PAY_6: {Clientes['PAY_6'][1]}")
+print(f"AGE: {Clientes['AGE'][1]}")
+
+# Imprimindo detalhes da Cliente 3
+print("Dados do Cliente 3:")
+print(f"EDUCATION: {Clientes['EDUCATION'][2]}")
+print(f"PAY_0: {Clientes['PAY_0'][2]}")
+print(f"PAY_2: {Clientes['PAY_2'][2]}")
+print(f"PAY_3: {Clientes['PAY_3'][2]}")
+print(f"PAY_4: {Clientes['PAY_4'][2]}")
+print(f"PAY_5: {Clientes['PAY_5'][2]}")
+print(f"PAY_6: {Clientes['PAY_6'][2]}")
+print(f"AGE: {Clientes['AGE'][2]}")
+
+# Imprimindo detalhes da Cliente 10
+print("Dados do Cliente 10:")
+print(f"EDUCATION: {Clientes['EDUCATION'][1]}")
+print(f"PAY_0: {Clientes['PAY_0'][9]}")
+print(f"PAY_2: {Clientes['PAY_2'][9]}")
+print(f"PAY_3: {Clientes['PAY_3'][9]}")
+print(f"PAY_4: {Clientes['PAY_4'][9]}")
+print(f"PAY_5: {Clientes['PAY_5'][9]}")
+print(f"PAY_6: {Clientes['PAY_6'][9]}")
+print(f"AGE: {Clientes['AGE'][9]}")
+
+O modelo previu que o cliente 1: Não pagará o Cartão de Crédito
+O modelo previu que o cliente 2: Não pagará o Cartão de Crédito
+O modelo previu que o cliente 3: Pagará o Cartão de Crédito
+O modelo previu que o cliente 4: Pagará o Cartão de Crédito
+O modelo previu que o cliente 5: Pagará o Cartão de Crédito
+O modelo previu que o cliente 6: Pagará o Cartão de Crédito
+O modelo previu que o cliente 7: Pagará o Cartão de Crédito
+O modelo previu que o cliente 8: Pagará o Cartão de Crédito
+O modelo previu que o cliente 9: Pagará o Cartão de Crédito
+O modelo previu que o cliente 10: Não pagará o Cartão de Crédito
+Dados do Cliente 1:
+EDUCATION: 3
+PAY_0: 2
+PAY_2: -1
+PAY_3: 0
+PAY_4: -1
+PAY_5: 2
+PAY_6: 1
+AGE: 25
+Dados do Cliente 2:
+EDUCATION: 6
+PAY_0: 5
+PAY_2: 5
+PAY_3: 5
+PAY_4: 6
+PAY_5: 6
+PAY_6: 0
+AGE: 25
+Dados do Cliente 3:
+EDUCATION: 2
+PAY_0: 0
+PAY_2: -1
+PAY_3: 1
+PAY_4: 0
+PAY_5: 1
+PAY_6: -1
+AGE: 22
+Dados do Cliente 10:
+EDUCATION: 6
+PAY_0: 6
+PAY_2: 2
+PAY_3: 0
+PAY_4: 5
+PAY_5: 2
+PAY_6: 1
+AGE: 25
+
+# Conclusões
+
+# O modelo se mostrou eficiente na identificação de clientes que não pagarão os cartões mais do que aqueles que pagaram.
+# Conseguimos identificar as principais features que possuem maior impacto para o modelo e conseguimos também identificar
+# as característica dos clientes
+
+# O modelo possui uma acurpacia de 76% o que é legal proque notamos que não ocorreu overfit nos dados, mas ainda há espaço para
+# a melhora do modelo.
+
+# Também podemos usar outros algorítmos para verificar se melhor se adequam aos dados como a regressão logística. 
