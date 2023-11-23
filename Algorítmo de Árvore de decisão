@@ -372,7 +372,7 @@ AGE: 25
 # Conseguimos identificar as principais features que possuem maior impacto para o modelo e conseguimos também identificar
 # as característica dos clientes
 
-# O modelo possui uma acurpacia de 76% o que é legal proque notamos que não ocorreu overfit nos dados, mas ainda há espaço para
+# O modelo possui uma acurácia de 76% o que é legal porque notamos que não ocorreu overfit nos dados, mas ainda há espaço para
 # a melhora do modelo.
 
 # Também podemos usar outros algorítmos para verificar se melhor se adequam aos dados como a regressão logística. 
