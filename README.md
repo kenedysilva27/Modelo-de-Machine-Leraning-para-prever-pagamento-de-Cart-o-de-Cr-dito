@@ -1,4 +1,5 @@
-Modelo para prever não pagamento de Cartão de Crédito
+# **Modelo para prever não pagamento de Cartão de Crédito**
+
 Este é um projeto em que uso Machine Learning com o algoritmo de árvore de decisão para prever o não pagamento de cartão de crédito.
 
 Os dados são públicos, trata-se do conjunto de dados Taiwan extraído do Kaggle.
